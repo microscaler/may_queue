@@ -45,15 +45,33 @@ struct BlockNode<T> {
 /// the queue is responsible to drop all the items
 /// and would call its get() method for the dropping
 impl<T> BlockNode<T> {
-    /// create a new BlockNode with uninitialized data
-    #[inline]
+    /// Allocate the block DIRECTLY on the heap.
+    ///
+    /// `Box::new(BlockNode { .. })` materialises the whole node - BLOCK_SIZE
+    /// slots of T - on the CALLER'S stack before moving it to the heap. With
+    /// a large T on a small coroutine stack that is a guard-page hit, and
+    /// may kills an overflowing coroutine WITHOUT unwinding, so the queue is
+    /// left corrupt mid-push and every later consumer parks forever
+    /// (microscaler/PriceWhisperer incident 2026-08-31: the BRRTRouter
+    /// dispatcher wedge - HandlerRequest blocks overflowed 256 KiB stacks).
+    ///
+    /// `alloc_zeroed` never touches the stack. Zeroed memory is a valid
+    /// state for every field here - atomics at 0 / null, `MaybeUninit`
+    /// slots - and any non-zero field is written through a raw pointer, so
+    /// no `BlockNode` value ever exists on the stack. The queue frees
+    /// blocks with `Box::from_raw`, which pairs with the global allocator
+    /// used here.
     fn new(index: usize) -> *mut BlockNode<T> {
-        Box::into_raw(Box::new(BlockNode {
-            next: AtomicPtr::new(ptr::null_mut()),
-            used: AtomicUsize::new(BLOCK_SIZE),
-            data: [Slot::UNINIT; BLOCK_SIZE],
-            start: AtomicUsize::new(index),
-        }))
+        unsafe {
+            let layout = std::alloc::Layout::new::<BlockNode<T>>();
+            let ptr = std::alloc::alloc_zeroed(layout).cast::<BlockNode<T>>();
+            if ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            ptr::addr_of_mut!((*ptr).used).write(AtomicUsize::new(BLOCK_SIZE));
+            ptr::addr_of_mut!((*ptr).start).write(AtomicUsize::new(index));
+            ptr
+        }
     }
 
     /// write index with data
