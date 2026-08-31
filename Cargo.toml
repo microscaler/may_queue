@@ -50,3 +50,7 @@ version = "1.0"
 [features]
 default = ["inner_cache"]
 inner_cache = []
+
+[[test]]
+name = "block_alloc_stack"
+path = "tests/block_alloc_stack.rs"

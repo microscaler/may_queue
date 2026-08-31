@@ -1,7 +1,7 @@
 //! Regression: block allocation must never materialise BLOCK_SIZE
 //! payloads on the pushing thread's stack. 4 KiB payload x 128 slots is a
 //! ~512 KiB frame under the old `Box::new(BlockNode { .. })`, which
-//! overflows the 64 KiB thread stack below; the `alloc_zeroed` version
+//! overflows the 128 KiB thread stack below (held tight enough that debug-mode per-item copies still fit); the `alloc_zeroed` version
 //! never touches the stack. (In production the victim was a may coroutine,
 //! killed WITHOUT unwinding, corrupting the queue mid-push - the
 //! PriceWhisperer BRRTRouter dispatcher wedge of 2026-08-31.)
@@ -27,7 +27,7 @@ where
 fn on_small_stack(name: &str, f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .name(name.to_string())
-        .stack_size(64 * 1024)
+        .stack_size(128 * 1024)
         .spawn(f)
         .unwrap()
         .join()

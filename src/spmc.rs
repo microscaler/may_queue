@@ -465,8 +465,13 @@ impl<T> Default for Queue<T> {
 
 impl<T> Drop for Queue<T> {
     fn drop(&mut self) {
-        //  pop all the element to make sure the queue is empty
-        while !self.bulk_pop().is_empty() {}
+        // Drain one item at a time. bulk_pop() returns
+        // SmallVec<[T; BLOCK_SIZE]> - BLOCK_SIZE payloads INLINE on the
+        // dropping thread or coroutine stack, which overflows a small
+        // stack for a large T (same incident as the BlockNode fix; the
+        // regression test drops a queue of 4 KiB payloads on a 128 KiB
+        // thread). pop() moves one T at a time.
+        while self.pop().is_some() {}
         let head = self.head.0.load(Ordering::Acquire);
         let (block, _id) = BlockPtr::unpack(head);
         let tail = self.tail.block.load(Ordering::Acquire);
